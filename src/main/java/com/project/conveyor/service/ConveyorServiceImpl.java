@@ -1,6 +1,8 @@
 package com.project.conveyor.service;
 
 import com.project.conveyor.config.BasicConfiguration;
+import com.project.conveyor.exception.PrescoringException;
+import com.project.conveyor.exception.ScoringException;
 import com.project.conveyor.model.*;
 import com.project.conveyor.model.enums.EmploymentStatus;
 import com.project.conveyor.model.enums.Gender;
@@ -10,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -28,49 +29,77 @@ public class ConveyorServiceImpl implements ConveyorService {
     @Autowired
     private BasicConfiguration basicConfiguration;
 
-    private boolean prescoring(@NotNull LoanApplicationRequestDTO request) {
+    private void prescoring (@NotNull LoanApplicationRequestDTO request) {
+
+        List<ReasonsForRefusal> reasons = new ArrayList<>();
 
         String firstName = request.getFirstName();
         boolean checkFirstName = firstName.matches("^[a-zA-Z]{2,30}");
-        if (!checkFirstName) return false;
+        if (!checkFirstName) {
+            reasons.add(new ReasonsForRefusal("firstName",
+                    "Invalid first name. (from 2 to 30 Latin letters)"));
+        }
 
         String lastName = request.getLastName();
         boolean checkLastName =
                 lastName.matches("^[a-zA-Z]{2,30}");
-        if (!checkLastName) return false;
+        if (!checkLastName) {
+            reasons.add(new ReasonsForRefusal("lastName",
+                    "Invalid last name. (from 2 to 30 Latin letters)"));
+        }
 
         String middleName = request.getMiddleName();
         boolean checkMiddleName =
                 middleName.matches("^[a-zA-Z]{2,30}");
-        if (!checkMiddleName) return false;
+        if (!checkMiddleName) {
+            reasons.add(new ReasonsForRefusal("middleName",
+                    "Invalid middle name. (from 2 to 30 Latin letters)"));
+        }
 
         BigDecimal requestAmount = request.getAmount();
-        int resultCompareTo = requestAmount.compareTo(new BigDecimal(10000.0));
+        int resultCompareTo = requestAmount.compareTo(BigDecimal.valueOf(10000.0));
         boolean checkAmount = resultCompareTo >= 0;
-        if (!checkAmount) return false;
+        if (!checkAmount) {
+            reasons.add(new ReasonsForRefusal("amount",
+                    "Invalid amount. (a real number greater than or equal to 10000)"));
+        }
 
         Integer term = request.getTerm();
-        boolean checkTerm = term >= 6 && term instanceof Integer;
-        if (!checkTerm) return false;
+        boolean checkTerm = term >= 6;
+        if (!checkTerm) {
+            reasons.add(new ReasonsForRefusal("term",
+                    "Invalid term. (an integer greater than or equal to 6)"));
+        }
 
         LocalDate birthDate = request.getBirthdate();
         int age = birthDate.until(LocalDate.now()).getYears();
         boolean checkAge = age >= 18;
-        if (!checkAge) return false;
+        if (!checkAge) {
+            reasons.add(new ReasonsForRefusal("birthdate",
+                    "Invalid birthdate. (in the format yyyy-mm-dd, no later than 18 years from the current day)"));
+        }
 
         String email = request.getEmail();
         boolean checkEmail = email.matches("[\\w\\.]{2,50}@[\\w\\.]{2,20}");
-        if (!checkEmail) return false;
+        if (!checkEmail) {
+            reasons.add(new ReasonsForRefusal("email",
+                    "Invalid email."));
+        }
 
         String passportSeries = request.getPassportSeries();
         boolean checkPassportSeries = passportSeries.matches("[0-9]{4}");
-        if (!checkPassportSeries) return false;
+        if (!checkPassportSeries) {
+            reasons.add(new ReasonsForRefusal("passportSeries",
+                    "Invalid passport series. (4 digits)"));
+        }
 
         String passportNumber = request.getPassportNumber();
         boolean checkPassportNumber = passportNumber.matches("[0-9]{6}");
-        if (!checkPassportNumber) return false;
-
-        return true;
+        if (!checkPassportNumber) {
+            reasons.add(new ReasonsForRefusal("passportNumber",
+                    "Invalid passport number. (6 digits)"));
+        }
+        if (!reasons.isEmpty()) throw new PrescoringException(reasons);
     }
 
     private LoanOfferDTO createLoanOfferDTO(Long applicationId,
@@ -79,8 +108,7 @@ public class ConveyorServiceImpl implements ConveyorService {
                                             Boolean isInsuranceEnabled,
                                             Boolean isSalaryClient) {
 
-        BigDecimal defaultRate = basicConfiguration.getDefaultRate();
-        BigDecimal rate = defaultRate;
+        BigDecimal rate = basicConfiguration.getDefaultRate();
 
         if (isInsuranceEnabled) {
             rate = rate.subtract(BigDecimal.valueOf(3.0)); // rate - 3.0
@@ -103,7 +131,7 @@ public class ConveyorServiceImpl implements ConveyorService {
             totalAmount = totalAmount.add(insurance);
         }
 
-        LoanOfferDTO offerDTO = new LoanOfferDTO(
+        return new LoanOfferDTO(
                 applicationId,
                 requestedAmount,
                 totalAmount,
@@ -113,81 +141,84 @@ public class ConveyorServiceImpl implements ConveyorService {
                 isInsuranceEnabled,
                 isSalaryClient
         );
-        return offerDTO;
     }
 
     public @NotNull ResponseEntity<?> getOffers(@NotNull LoanApplicationRequestDTO request) {
         long applicationId = 432;
         List<LoanOfferDTO> loanOfferDTOList = new ArrayList<>();
 
-        if (prescoring(request)) {
+        prescoring(request);
 
-            BigDecimal requestedAmount = request.getAmount();
-            int term = request.getTerm();
+        BigDecimal requestedAmount = request.getAmount();
+        int term = request.getTerm();
 
-            LoanOfferDTO firstOffer = createLoanOfferDTO(applicationId,
-                                                         requestedAmount,
-                                                         term,
-                                                         true,
-                                                         true);
-            loanOfferDTOList.add(firstOffer);
+        LoanOfferDTO firstOffer = createLoanOfferDTO(applicationId,
+                                                     requestedAmount,
+                                                     term,
+                                                     true,
+                                                     true);
+        loanOfferDTOList.add(firstOffer);
 
-            LoanOfferDTO secondOffer = createLoanOfferDTO(applicationId,
-                                                          requestedAmount,
-                                                          term,
-                                                          true,
-                                                          false);
-            loanOfferDTOList.add(secondOffer);
+        LoanOfferDTO secondOffer = createLoanOfferDTO(applicationId,
+                                                      requestedAmount,
+                                                      term,
+                                                      true,
+                                                      false);
+        loanOfferDTOList.add(secondOffer);
 
-            LoanOfferDTO thirdOffer = createLoanOfferDTO(applicationId,
-                                                         requestedAmount,
-                                                         term,
-                                                         false,
-                                                         true);
-            loanOfferDTOList.add(thirdOffer);
+        LoanOfferDTO thirdOffer = createLoanOfferDTO(applicationId,
+                                                     requestedAmount,
+                                                     term,
+                                                     false,
+                                                     true);
+        loanOfferDTOList.add(thirdOffer);
 
-            LoanOfferDTO fourthOffer = createLoanOfferDTO(applicationId,
-                                                         requestedAmount,
-                                                         term,
-                                                         false,
-                                                         false);
-            loanOfferDTOList.add(fourthOffer);
+        LoanOfferDTO fourthOffer = createLoanOfferDTO(applicationId,
+                                                     requestedAmount,
+                                                     term,
+                                                     false,
+                                                     false);
+        loanOfferDTOList.add(fourthOffer);
 
-            return ResponseEntity.ok(loanOfferDTOList);
-        }
+        return ResponseEntity.ok(loanOfferDTOList);
 
-        return new ResponseEntity<>("Не правильный JSON!", HttpStatus.BAD_REQUEST);
     }
 
-    private boolean scoring(ScoringDataDTO request) {
+    private void scoring(ScoringDataDTO request) {
         EmploymentDTO employment = request.getEmployment();
 
+        List<ReasonsForRefusal> reasons = new ArrayList<>();
+
         if (employment.getEmploymentStatus() == EmploymentStatus.UNEMPLOYED) {
-            return false;
+            reasons.add(new ReasonsForRefusal("employmentStatus",
+                    "You're employment status is UNEMPLOYED."));
         }
 
         BigDecimal limitRequestedAmount = employment.getSalary().multiply(BigDecimal.valueOf(20)); // salary * 20
-        if (limitRequestedAmount.compareTo(request.getAmount()) == -1) {
-            return false;
+        if (limitRequestedAmount.compareTo(request.getAmount()) < 0) {
+            reasons.add(new ReasonsForRefusal("amount/salary",
+                    "The loan amount is more than 20 salaries."));
         }
 
         LocalDate birthDate = request.getBirthdate();
         int age = birthDate.until(LocalDate.now()).getYears();
         if (age < 20 || age > 60) {
-            return false;
+            reasons.add(new ReasonsForRefusal("birthdate",
+                    "Age less than 20 or more than 60 years."));
         }
 
         int workExperienceTotal = employment.getWorkExperienceTotal();
         if (workExperienceTotal < 12) {
-            return false;
+            reasons.add(new ReasonsForRefusal("workExperienceTotal",
+                    "Total experience less than 12 months."));
         }
 
         int workExperienceCurrent = employment.getWorkExperienceCurrent();
-        if (workExperienceCurrent < 3) {
-            return false;
+        if (workExperienceCurrent <= 3) {
+            reasons.add(new ReasonsForRefusal("workExperienceCurrent",
+                    "Current experience less than 3 months."));
         }
-
-        return true;
+        if (!reasons.isEmpty()) throw new ScoringException(reasons);
     }
 
     private List<PaymentScheduleElement> paymentScheduleCalculation(BigDecimal amount,
@@ -207,6 +238,7 @@ public class ConveyorServiceImpl implements ConveyorService {
 
             BigDecimal rateDecimal = rate.divide(BigDecimal.valueOf(100), 20, RoundingMode.HALF_EVEN);
             BigDecimal dailyCoef = new BigDecimal(0);
+
             // dailyCoef is lengthMonth / lengthYear
             if (datePayment.getMonthValue() == 1 && i > 0) {
                 boolean isLeapBeforeYear = datePayment.minusYears(1).isLeapYear();
@@ -276,7 +308,7 @@ public class ConveyorServiceImpl implements ConveyorService {
 
         LocalDate dateFirstPayment = LocalDate.now().plusMonths(1);
 
-        CreditDTO creditDTO = new CreditDTO(
+        return new CreditDTO(
                 amount,
                 term,
                 monthlyPayment,
@@ -290,67 +322,65 @@ public class ConveyorServiceImpl implements ConveyorService {
                         monthlyPayment,
                         dateFirstPayment)
         );
-        return creditDTO;
     }
 
     public @NotNull ResponseEntity<?> calculationCreditParams(@NotNull ScoringDataDTO request) {
 
         BigDecimal defaultRate = basicConfiguration.getDefaultRate();
 
-        if (scoring(request)) {
+        scoring(request);
 
-            EmploymentDTO employment = request.getEmployment();
-            BigDecimal rate = defaultRate;
+        EmploymentDTO employment = request.getEmployment();
+        BigDecimal rate = defaultRate;
 
-            EmploymentStatus employmentStatus = employment.getEmploymentStatus();
-            if (employmentStatus == EmploymentStatus.SELF_EMPLOYED) {
-                rate = rate.add(BigDecimal.valueOf(1));
-            }
-            if (employmentStatus == EmploymentStatus.BUSINESS_OWNER) {
-                rate = rate.add(BigDecimal.valueOf(3));
-            }
-
-            Position position = employment.getPosition();
-            if (position == Position.MIDDLE_MANAGER) {
-                rate = rate.subtract(BigDecimal.valueOf(2));
-            }
-            if (position == Position.TOP_MANAGER) {
-                rate = rate.subtract(BigDecimal.valueOf(4));
-            }
-
-            MaritalStatus maritalStatus = request.getMaritalStatus();
-            if (maritalStatus == MaritalStatus.MARRIED) {
-                rate = rate.subtract(BigDecimal.valueOf(3));
-            }
-            if (maritalStatus == MaritalStatus.DIVORCED) {
-                rate = rate.add(BigDecimal.valueOf(1));
-            }
-
-            if (request.getDependentAmount() > 1) {
-                rate = rate.add(BigDecimal.valueOf(1));
-            }
-
-            Gender gender = request.getGender();
-            LocalDate birthDate = request.getBirthdate();
-            int age = birthDate.until(LocalDate.now()).getYears();
-            if (gender == Gender.FEMALE && age >= 35 && age <= 60) {
-                rate = rate.subtract(BigDecimal.valueOf(3));
-            }
-            if (gender == Gender.MALE && age >= 30 && age <= 55) {
-                rate = rate.subtract(BigDecimal.valueOf(3));
-            }
-            if (gender == Gender.NON_BINARY) {
-                rate = rate.add(BigDecimal.valueOf(3));
-            }
-
-            BigDecimal amount = request.getAmount();
-            int term = request.getTerm();
-            boolean isInsuranceEnabled = request.getIsInsuranceEnabled();
-            boolean isSalaryClient = request.getIsSalaryClient();
-
-            CreditDTO response = createCreditDTO(amount, term, rate, isInsuranceEnabled, isSalaryClient);
-            return ResponseEntity.ok(response);
+        EmploymentStatus employmentStatus = employment.getEmploymentStatus();
+        if (employmentStatus == EmploymentStatus.SELF_EMPLOYED) {
+            rate = rate.add(BigDecimal.valueOf(1));
         }
-        return new ResponseEntity<>("Вам отказано в кредите!", HttpStatus.BAD_REQUEST);
+        if (employmentStatus == EmploymentStatus.BUSINESS_OWNER) {
+            rate = rate.add(BigDecimal.valueOf(3));
+        }
+
+        Position position = employment.getPosition();
+        if (position == Position.MIDDLE_MANAGER) {
+            rate = rate.subtract(BigDecimal.valueOf(2));
+        }
+        if (position == Position.TOP_MANAGER) {
+            rate = rate.subtract(BigDecimal.valueOf(4));
+        }
+
+        MaritalStatus maritalStatus = request.getMaritalStatus();
+        if (maritalStatus == MaritalStatus.MARRIED) {
+            rate = rate.subtract(BigDecimal.valueOf(3));
+        }
+        if (maritalStatus == MaritalStatus.DIVORCED) {
+            rate = rate.add(BigDecimal.valueOf(1));
+        }
+
+        if (request.getDependentAmount() > 1) {
+            rate = rate.add(BigDecimal.valueOf(1));
+        }
+
+        Gender gender = request.getGender();
+        LocalDate birthDate = request.getBirthdate();
+        int age = birthDate.until(LocalDate.now()).getYears();
+        if (gender == Gender.FEMALE && age >= 35 && age <= 60) {
+            rate = rate.subtract(BigDecimal.valueOf(3));
+        }
+        if (gender == Gender.MALE && age >= 30 && age <= 55) {
+            rate = rate.subtract(BigDecimal.valueOf(3));
+        }
+        if (gender == Gender.NON_BINARY) {
+            rate = rate.add(BigDecimal.valueOf(3));
+        }
+
+        BigDecimal amount = request.getAmount();
+        int term = request.getTerm();
+        boolean isInsuranceEnabled = request.getIsInsuranceEnabled();
+        boolean isSalaryClient = request.getIsSalaryClient();
+
+        CreditDTO response = createCreditDTO(amount, term, rate, isInsuranceEnabled, isSalaryClient);
+        return ResponseEntity.ok(response);
+
     }
 }
